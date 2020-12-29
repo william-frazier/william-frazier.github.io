@@ -6,6 +6,7 @@ date:   2020-12-29 15:12:00 -0500
 comments: true
 tags: [networking]
 gh-badge: [follow]
+gh-repo: william-frazier
 topic: networking
 ---
 I want to write a series of posts about how modern networks operate. Most of this
