@@ -2,7 +2,7 @@
 layout: post
 title:  "The Application Layer"
 date:   2021-1-12 00:00:00 -0500
-topic: networking
+tags: [networking]
 ---
 
 # Introduction
