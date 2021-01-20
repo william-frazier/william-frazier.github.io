@@ -2,7 +2,7 @@
 layout: post
 title:  "Chaosnet"
 date:   2021-1-12 00:00:00 -0500
-topic: networking, reading
+tags: [networking, reading]
 ---
 
 # Interesting Historical Note
