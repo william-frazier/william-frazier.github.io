@@ -2,7 +2,7 @@
 layout: post
 title:  "Networking Terms"
 date:   2021-1-4 00:00:00 -0500
-topic: networking
+tags: [networking]
 ---
 # Networks
 
