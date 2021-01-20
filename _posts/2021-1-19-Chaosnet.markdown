@@ -2,7 +2,7 @@
 layout: post
 title:  "The Transport Layer"
 date:   2021-1-12 00:00:00 -0500
-topic: networking
+topic: networking, reading
 ---
 
 # Interesting Historical Note
