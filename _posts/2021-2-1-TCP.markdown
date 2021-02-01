@@ -1,0 +1,54 @@
+---
+layout: post
+title:  "TCP"
+date:   2021-2-1 00:00:00 -0500
+tags: [networking]
+---
+
+# Introduction
+
+In this post, we'll finally cover **TCP (transmission control protocol)**. This is a pretty interesting (and complex!) topic so this post will necessarily be incomplete. Hopefully, it will provide enough information for you to understand how TCP works in a general sense. For more details, many people recommend [TCP/IP Illustrated Vol. 1](https://books.google.com/books?id=X-l9NX3iemAC&sitesec=buy&source=gbs_atb) although I haven't actually read it yet. In order to explain TCP, I'm going to follow the same structure as [Computer Networking: A Top-Down Approach](https://www.amazon.com/Computer-Networking-Top-Down-Approach-7th/dp/0133594149#:~:text=Unique%20among%20computer%20networking%20texts,down%20toward%20the%20physical%20layer%2C). That is to say, we'll first build a generic protocol and slowly build it up to something that looks like TCP.
+
+# Reliable Transmission
+
+In the last post, we looked at UDP. This protocol didn't really offer any features; it just sent out data and hoped it arrived. This won't work for many cases. We also need a protocol that offers some guarantees, particularly a guarantee that all data arrives and that it arrives in the order in which it was sent. We'll start designing such a protocol here.
+
+In our first iteration, v1, we assume that the underlying communication channel is 100% reliable. In this case, we can just send our data as is and we know it will arrive uncorrupted and in order. For v2, we assume that some bits can be corrupted. We probably want some way to say "message received" and "there was an issue" so we have the receiver send things back to the sender. Such a protocol is called a **ARQ (automatic repeat request) protocol**. We also need some checksum field so that the receiver knows if the message was corrupted. So our sender sends a packet and then waits for either ACK (message acknowledged) or NAK (message not acknowledged). This is pretty simple. All we have is a checksum field to look for errors (even UDP has this!) and the receiver will tell the sender whether the message was received correctly or incorrectly.
+
+But we have a problem because what if the ACK or NAK message is corrupted? Well we can add a simple 0 or 1 sequence number to each packet. This way if the sender didn't understand the message, it can just resend the last packet and the receiver can see if this is the same as the last packet or new. This is v2.1. We can make it a little simpler by replacing NAK with just sending a duplicate ACK, v2.2. So now, the sender is sending one message at a time. The receiver indicates if the message was received correctly or not. If it was, the sender sends the next packet. If not, resend the previous packet. If the sender gets a corrupted message from the receiver or if it receives an ACK with the wrong number, the sender just resends the previous packet.
+
+For v3, we consider a network that can also lose packets. To solve this problem, we give the server a timer. If an ACK was not received within the given time frame (because the data packet or the ACK were lost or because either of those were delayed) then the server can just resend the data packet.
+
+This is pretty good but it's still not quite enough. If a computer in the US wants to talk to a computer in Egypt, the delay between them might be quite high. Waiting for confirmation of every single packet is really inconvenient and slow. Instead, we can send a number of packets at once. Exactly how this is chosen is surprisingly complicated but basically, you can think of value being set as the minimum of the bandwidth delay product (discussed in a previous post) and the amount of packets the receiver says it can handle. Again, it's more complicated than that but that gives you a good approximation. Of course, this means we need more sequence numbers so we have to add that to v4. Now we are able to send out a number of packets and send more as we receive ACKs for early packets. (There are also a few different modes of TCP but I'm not sure if that's worth delving into either.)
+
+# TCP
+
+The first thing to say, is that a TCP connection is setup using the 3-way handshake. For the TCP handshake, the client first sends a segment with no data with the SYN flag set to 1 and a random sequence number. The server sets aside the buffers and all that it will need and replies with its own random sequence number and both the SYN and ACK flags set to 1 (hence why this is called a SYNACK). The client then allocates all of its buffers and such and acknowledges the server's SYNACK (note that here SYN is set to 0). This can cause problems with denial-of-service attacks so some servers may be configured to not actually set aside buffers until the ACK is received.
+
+The TCP header consists of: source and destination port numbers, a checksum, a 32-bit sequence _and_ a 32-bit acknowledgement number field, a 16-bit receive window field which is used for flow control (detailed below) by telling the sender how many bytes the receiver is willing to receive, an optional and variable length options field which can be used for things like negotiating the MSS (detailed below) or adding timestamps, and finally a some flags. The different flags are ACK which is set to 1 if message was correctly received; RST, SYN, and FIN which are used to create and breakdown connections; CWR and ESE which are used for congestion control (detailed below); PSH which says to push the data to the upper layer immediately; and URG which says that there is urgent data and the urgent data pointer points to the end of it. In practice, PSH and URG aren't used. Depending on your version of TCP, there may be different flags. There are also a few unused bits that are reserved for future use. There is also something called header length. All in all, a TCP header contains 20 bytes of overhead (depending on the options). The sequence numbers count, starting from some randomly selected number, the number of _bytes_ of data sent so far (so note, these are not packet sequence numbers). The acknowledgement sequence number is the byte number that the receiver is expecting next (e.g., if it just received the first 535 bytes, it puts 536 in that field).
+
+Ok so let's cover some of those terms. TCP provides **flow control** (making sure sender doesn't overrun receiver) and **congestion control** (making sure sender doesn't overrun the network). These are also relatively complex but the gist is that when TCP is deciding how many messages to send at once (what we'll call the window size), the receiver is asked how much data it can accept. TCP won't send more than this amount of data (unless this is set to 0, in which case TCP will still send one packet). This prevents the receiver from being overrun with too much data. Congestion control is even more complicated and probably worthy of a whole blog post but basically if messages don't receive an ACK, TCP assumes they were dropped because the network is congested and in turn it will send the data at a lower rate. To counteract this, TCP will slightly increase the rate at which it transmits occasionally. This leads to a sawtooth pattern where TCP slowly increases its transmission rate and then suddenly cuts it when an ACK isn't received. Now it's more complicated than this and also, this isn't necessarily even true for the newest versions of TCP (the reason being that some of these assumptions are no longer rational, such as assuming that an ACK is missing due to network congestion).
+
+TCP avoids dropping messages by waiting for ACKs to ensure the message arrives. It will wait for a period of time called the **retransmission time out (RTO)** before it assumes a message was dropped and resends it (this is like or v3 protocol above). We set RTO to be slightly larger than RTT (the amount of time it takes to send a packet and get a response). Too large and we waste too much time, too little and any delay introduced to the network will cause a timeout even when the message wasn't dropped.
+
+But how do we actually calculate RTT? Well at any given time, TCP is measuring the RTT for a single packet which has only been transmitted once (packets that have to be retransmitted won't be used in this calculation). We call this sample_RTT. Now we calculate estimated_RTT=(1-a)\*estimated_RTT + a\* sample_RTT with a usually taken to be 1/8. We also want to estimate the variability of RTT which we calculate as dev_RTT=(1-b)\*dev_RTT+b\*|sample_RTT - estimated_RTT| with b usually taken to be 1/4. Now we can use these values to calculate our RTO: timeout=estimated_RTT+4*dev_RTT with an initial timeout of 1 second. Immediately following a timeout, timeout is doubled but once another packet is received we go back to the formula.
+
+If the client wants to close a connection they send a message with the FIN flag set to 1. The server will ACK that message and then send another packet, this one with the FIN flag set to 1. The client then replies by ACKing the server's FIN. After this is over, it seems the client waits a bit: 2\*MPL (**maximum packet lifetime**, the longest we assume a packet can exist on the wire) which is typically 120 seconds. This ensures nothing else is coming.
+
+# Misc
+
+Here is a collection of things which I think are important but I wasn't sure how to weave into the above section.
+
+The RFC which laid out TCP actually doesn't specify what to do if bytes come in out of order. However, in practice, the receiver keeps the out-of-order bytes in its buffer until the missing bytes are received.
+
+TCP is point-to-point meaning that it only ever connects two hosts. There is no way to send a single message and have it go to two different receivers.
+
+The term **goodput** refers to the amount of new data transmitted per unit of time.
+
+We use the term **client process** to refer to whichever party initiated a TCP connection. A **server process** is the party which received the request.
+
+TCP/IP was actually initially one protocol. However it was eventually separated into two separate layers.
+
+If a server isn't accepting connections on a given port number, it replies with the RST (reset) bit set which tells the client that the port is closed and to not resend the segment.
+
+The max size of a segment, the **maximum segment size (MSS)**, is generally about 1,460 bytes so that when TCP/IP headers and all are appended it ends up being about 1,500 bytes which is the true maximum size, the **maximum transmission unit (MTU)** for some networks. Note that the MSS is the maximum amount of data you can put into a segment, not the maximum amount of data plus the header.
